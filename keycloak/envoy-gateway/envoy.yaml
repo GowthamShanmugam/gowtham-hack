@@ -1,0 +1,117 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: envoy-config
+  namespace: keycloak
+data:
+  envoy.yaml: |
+    static_resources:
+      listeners:
+        - name: listener_0
+          address:
+            socket_address:
+              address: 0.0.0.0
+              port_value: 8080
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: ingress_http
+                    route_config:
+                      name: local_route
+                      virtual_hosts:
+                        - name: backend
+                          domains: ["*"]
+                          routes:
+                            - match:
+                                prefix: "/api/service1"
+                              route:
+                                cluster: service1
+                            - match:
+                                prefix: "/api/service2"
+                              route:
+                                cluster: service2
+                    http_filters:
+                      - name: envoy.filters.http.jwt_authn
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+                          providers:
+                            keycloak:
+                              issuer: "https://keycloak-helm-dev.apps.rosa.gowtham-rosa.pygl.p3.openshiftapps.com/realms/rhoai-poc"
+                              remote_jwks:
+                                http_uri:
+                                  uri: "https://keycloak-helm-dev.apps.rosa.gowtham-rosa.pygl.p3.openshiftapps.com/realms/rhoai-poc/protocol/openid-connect/certs"
+                                  cluster: keycloak
+                                  timeout: 5s
+                                cache_duration:
+                                  seconds: 600
+                              forward: true
+                              from_headers:                       
+                                - name: x-forwarded-access-token
+                          rules:
+                            - match:
+                                prefix: "/api/"
+                              requires:
+                                provider_name: keycloak
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+      clusters:
+        - name: keycloak
+          connect_timeout: 0.25s
+          type: LOGICAL_DNS
+          lb_policy: ROUND_ROBIN
+          load_assignment:
+            cluster_name: keycloak
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address:
+                          address: keycloak-helm-dev.apps.rosa.gowtham-rosa.pygl.p3.openshiftapps.com
+                          port_value: 443
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+        - name: service1
+          type: STRICT_DNS
+          connect_timeout: 0.5s
+          lb_policy: ROUND_ROBIN
+          load_assignment:
+            cluster_name: service1
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address:
+                          address: service1.service1.svc.cluster.local
+                          port_value: 5000
+        - name: service2
+          type: STRICT_DNS
+          connect_timeout: 0.5s
+          lb_policy: ROUND_ROBIN
+          load_assignment:
+            cluster_name: service2
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address:
+                          address: service2.service2.svc.cluster.local
+                          port_value: 5000
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: envoy
+  namespace: keycloak
+spec:
+  selector:
+    app: envoy
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

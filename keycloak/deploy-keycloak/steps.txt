@@ -1,0 +1,90 @@
+1. Create Namespace
+oc new-project keycloak
+
+2. Install PostgreSQL
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo update
+
+helm install keycloak-db bitnami/postgresql -n keycloak \
+  --set auth.username=keycloak \
+  --set auth.password=<your-db-pass> \
+  --set auth.database=keycloak \
+  --set primary.persistence.enabled=true \
+  --set primary.persistence.size=1Gi
+
+
+oc get pods -n keycloak -w
+
+
+3. Create helm-pg.yaml for Keycloak values
+# helm-pg.yaml
+auth:
+  adminUser: admin
+  adminPassword: <your-admin-pass>  # change for real usage!
+
+externalDatabase:
+  host: keycloak-db-postgresql.keycloak.svc.cluster.local
+  user: keycloak
+  password: <your-db-pass>
+  database: keycloak
+
+extraEnvVars:
+  - name: KC_HOSTNAME
+    value: keycloak-helm-dev.apps.rosa.gowtham-rosa.pygl.p3.openshiftapps.com
+  - name: KC_PROXY
+    value: edge
+  - name: KC_HOSTNAME_STRICT
+    value: "false"
+  - name: KC_HOSTNAME_STRICT_HTTPS
+    value: "false"
+  - name: KC_LOG_LEVEL
+    value: INFO
+  - name: KC_HEALTH_ENABLED
+    value: "true"
+  - name: KEYCLOAK_HTTP_RELATIVE_PATH
+    value: /auth
+
+service:
+  ports:
+    http: 8080
+
+ingress:
+  enabled: true
+  className: openshift
+  hostname: keycloak-helm-dev.apps.rosa.gowtham-rosa.pygl.p3.openshiftapps.com
+  tls: true
+  annotations:
+    route.openshift.io/termination: edge
+    route.openshift.io/insecure-edge-termination-policy: Redirect
+
+persistence:
+  enabled: true
+  size: 1Gi
+
+4. Deploy Keycloak with Helm
+helm install keycloak bitnami/keycloak -n keycloak -f helm-pg.yaml
+
+(or) helm upgrade keycloak bitnami/keycloak -n keycloak -f helm-pg.yaml
+
+
+5. Verify Deployment
+oc get pods -n keycloak
+oc get route -n keycloak
+
+Check that the Keycloak route is available:
+https://keycloak-helm-dev.apps.rosa.gowtham-rosa.pygl.p3.openshiftapps.com/auth/admin/
+
+
+Login:
+
+Username: admin
+Password: <your-admin-pass>
+
+
+To Uninstall
+helm uninstall keycloak -n keycloak
+helm uninstall keycloak-db -n keycloak  # (if using internal PostgreSQL)
+oc delete project keycloak
+
+
+

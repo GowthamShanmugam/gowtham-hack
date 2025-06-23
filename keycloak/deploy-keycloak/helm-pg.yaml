@@ -1,0 +1,61 @@
+# helm-pg.yaml
+
+auth:
+  adminUser: admin
+  adminPassword: <your-admin-pass> # <<-- CHANGE THIS TO A SECURE PASSWORD FOR YOUR DEV!
+
+externalDatabase:
+  host: keycloak-db-postgresql.keycloak.svc.cluster.local
+  user: keycloak
+  password: <your-db-domain>
+  database: keycloak
+
+keycloak:
+  # No need for database.vendor: h2 or externalDatabase here, as PostgreSQL is enabled.
+  # Bitnami chart should automatically configure Keycloak to use the bundled PostgreSQL.
+  extraEnvVars:
+    - name: KC_HOSTNAME
+      value: keycloak-helm-dev.apps.rosa.gowtham-rosa.pygl.p3.openshiftapps.com # <<-- YOUR ACTUAL ROUTE HOSTNAME
+    - name: KC_PROXY
+      value: reencrypt
+    - name: KC_HOSTNAME_STRICT_HTTPS
+      value: "false"
+    - name: KC_HOSTNAME_STRICT
+      value: "false"
+    - name: KC_LOG_LEVEL
+      value: "INFO"
+    - name: KC_HEALTH_ENABLED
+      value: "true"
+    - name: KEYCLOAK_HTTP_RELATIVE_PATH
+      value: /
+    # No KC_FEATURES or KC_DB here, let chart defaults handle it.
+    #- name: KC_HTTPS_ENABLED
+    #  value: "true"
+    #- name: KC_HTTPS_PORT
+    #	  value: "8443"
+
+service:
+  type: ClusterIP
+  ports:
+    http: 8080
+    https: 8443
+
+ingress:
+  enabled: true
+  className: openshift
+  hostname: keycloak-helm-dev.apps.rosa.gowtham-rosa.pygl.p3.openshiftapps.com # <<-- MATCHES KC_HOSTNAME
+  tls: true
+  annotations:
+    route.openshift.io/termination: edge
+    # route.openshift.io/insecure-edge-termination-policy: Redirect
+
+# Persistence for Keycloak (recommended for data persistence even in dev)
+persistence:
+  enabled: true
+  size: 1Gi
+
+# Persistence for PostgreSQL (recommended for data persistence even in dev)
+postgresql:
+  persistence:
+    enabled: true
+    size: 1Gi

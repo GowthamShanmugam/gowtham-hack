@@ -1,0 +1,2 @@
+oc new-app --name redis --docker-image=redis
+oc expose svc redis
