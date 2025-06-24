@@ -28,11 +28,22 @@ data:
                                 prefix: "/api/service1"
                               route:
                                 cluster: service1
+                              typed_per_filter_config:
+                                envoy.filters.http.cors:
+                                  "@type": type.googleapis.com/envoy.extensions.filters.http.cors.v3.CorsPolicy
+                                  allow_origin_string_match:
+                                    - exact: "https://oauth2-client.apps.rosa.gowtham-rosa.pygl.p3.openshiftapps.com"
+                                  allow_methods: "GET, OPTIONS"
+                                  allow_headers: "Authorization, Content-Type"
+                                  allow_credentials: true
                             - match:
                                 prefix: "/api/service2"
                               route:
                                 cluster: service2
                     http_filters:
+                      - name: envoy.filters.http.cors
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.cors.v3.Cors
                       - name: envoy.filters.http.jwt_authn
                         typed_config:
                           "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
@@ -101,17 +112,3 @@ data:
                         socket_address:
                           address: service2.service2.svc.cluster.local
                           port_value: 5000
-
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: envoy
-  namespace: keycloak
-spec:
-  selector:
-    app: envoy
-  ports:
-    - name: http
-      port: 8080
-      targetPort: 8080

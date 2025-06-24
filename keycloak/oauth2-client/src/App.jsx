@@ -1,14 +1,13 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import Home from './Home';
+// App.js
+import React from 'react';
+import { useRoutes } from 'react-router-dom';
+import Login from './Login';
+import SecureService from './SecureService';
 
-function App() {
-  return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<Home />} />
-      </Routes>
-    </Router>
-  );
+export default function App() {
+  const routes = useRoutes([
+    { path: '/', element: <Login /> },
+    { path: '/secure', element: <SecureService /> },
+  ]);
+  return routes;
 }
-
-export default App;

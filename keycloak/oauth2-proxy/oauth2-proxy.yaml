@@ -17,6 +17,9 @@ spec:
         - name: oauth2-proxy
           image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
           args:
+            - '--whitelist-domain=oauth2-client.apps.rosa.gowtham-rosa.pygl.p3.openshiftapps.com'
+            - '--reverse-proxy=true'
+            - '--skip-provider-button=true'
             - '--provider=keycloak-oidc'
             - '--client-id=oauth2-proxy'
             - '--client-secret=<client-secret>'

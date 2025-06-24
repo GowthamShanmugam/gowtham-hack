@@ -68,3 +68,8 @@ This section has moved here: [https://facebook.github.io/create-react-app/docs/d
 ### `npm run build` fails to minify
 
 This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+
+### Build using podman
+
+podman buildx build --platform linux/amd64 -t quay.io/gshanmug-quay/oauth2-client:latest3 .
+podman push quay.io/gshanmug-quay/oauth2-client:latest3

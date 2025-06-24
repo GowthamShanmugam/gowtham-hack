@@ -1,0 +1,65 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: envoy
+  namespace: keycloak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: envoy
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: envoy
+    spec:
+      volumes:
+        - name: config
+          configMap:
+            name: envoy-config
+            defaultMode: 420
+      containers:
+        - resources: {}
+          terminationMessagePath: /dev/termination-log
+          name: envoy
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: config
+              readOnly: true
+              mountPath: /etc/envoy
+          terminationMessagePolicy: File
+          image: 'envoyproxy/envoy:v1.29-latest'
+          args:
+            - '-c'
+            - /etc/envoy/envoy.yaml
+            - '--log-level'
+            - debug
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+      securityContext: {}
+      schedulerName: default-scheduler
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 25%
+  revisionHistoryLimit: 10
+  progressDeadlineSeconds: 600
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: envoy
+  namespace: keycloak
+spec:
+  selector:
+    app: envoy
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
