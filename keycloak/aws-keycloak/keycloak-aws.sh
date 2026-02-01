@@ -104,7 +104,7 @@ collect_user_input() {
     echo -e "   ${GREEN}✓${NC} Instance name: $INSTANCE_NAME"
     
     USE_HTTPS="yes"
-    echo -e "   ${GREEN}✓${NC} HTTPS enabled (port 8443)"
+    echo -e "   ${GREEN}✓${NC} HTTPS enabled (port 443)"
     
     echo ""
     echo -e "${YELLOW}🌐 VPC Selection:${NC}"
@@ -112,8 +112,8 @@ collect_user_input() {
     echo -e "  2) Select from existing VPCs"
     echo -e "  3) Specify subnet ID directly"
     echo -e "  4) Auto-detect (use default or first available)"
-    read -p "Choose option [1-4] [4]: " VPC_OPTION
-    VPC_OPTION=${VPC_OPTION:-4}
+    read -p "Choose option [1-4] [1]: " VPC_OPTION
+    VPC_OPTION=${VPC_OPTION:-1}
 }
 
 # Function to setup key pair
@@ -363,27 +363,36 @@ setup_security_group() {
     
     if [ "$USE_EXISTING_SG" == "yes" ]; then
         echo -e "   ${YELLOW}Listing security groups in VPC $VPC_ID...${NC}"
-        aws ec2 describe-security-groups \
-            --filters "Name=vpc-id,Values=$VPC_ID" \
-            --query 'SecurityGroups[*].[GroupId,GroupName,Description]' \
-            --output table
-        echo ""
-        read -p "Enter the Security Group ID to use: " SG_ID
-        
-        if [ -z "$SG_ID" ]; then
-            echo -e "   ${RED}❌ No security group ID provided${NC}"
+        SG_COUNT=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" --query 'length(SecurityGroups)' --output text 2>/dev/null | head -1 | tr -d '[:space:]')
+        if [ -z "$SG_COUNT" ] || [ "$SG_COUNT" = "0" ]; then
+            echo -e "   ${RED}❌ No security groups found in VPC $VPC_ID${NC}"
             exit 1
         fi
-        
+        for i in $(seq 0 $((SG_COUNT - 1))); do
+            SG_GID=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" --query "SecurityGroups[$i].GroupId" --output text 2>/dev/null)
+            SG_GNAME=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" --query "SecurityGroups[$i].GroupName" --output text 2>/dev/null)
+            echo -e "   $((i + 1))) $SG_GNAME ($SG_GID)"
+        done
+        echo ""
+        read -p "Enter security group number or ID [1]: " SG_INPUT
+        SG_INPUT=${SG_INPUT:-1}
+        if [[ "$SG_INPUT" =~ ^sg- ]]; then
+            SG_ID="$SG_INPUT"
+        else
+            IDX=$(($SG_INPUT - 1))
+            SG_ID=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" --query "SecurityGroups[$IDX].GroupId" --output text 2>/dev/null)
+        fi
+        if [ -z "$SG_ID" ] || [ "$SG_ID" == "None" ]; then
+            echo -e "   ${RED}❌ Security group not found in VPC $VPC_ID${NC}"
+            exit 1
+        fi
         set +e
         SG_VERIFY=$(aws ec2 describe-security-groups --group-ids $SG_ID --filters "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null)
         set -e
-        
         if [ -z "$SG_VERIFY" ] || [ "$SG_VERIFY" == "None" ] || [ "$SG_VERIFY" != "$SG_ID" ]; then
             echo -e "   ${RED}❌ Security group $SG_ID not found in VPC $VPC_ID${NC}"
             exit 1
         fi
-        
         echo -e "   ${GREEN}✓${NC} Using existing security group: $SG_ID"
     else
         SG_NAME="keycloak-sg"
@@ -420,23 +429,31 @@ setup_security_group() {
                     
                     if [ "$USE_EXISTING" == "yes" ]; then
                         echo -e "   ${YELLOW}Listing security groups in VPC $VPC_ID...${NC}"
-                        aws ec2 describe-security-groups \
-                            --filters "Name=vpc-id,Values=$VPC_ID" \
-                            --query 'SecurityGroups[*].[GroupId,GroupName,Description]' \
-                            --output table
-                        echo ""
-                        read -p "Enter the Security Group ID to use: " SG_ID
-                        
-                        if [ -z "$SG_ID" ]; then
+                        SG_COUNT=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" --query 'length(SecurityGroups)' --output text 2>/dev/null | head -1 | tr -d '[:space:]')
+                        if [ -n "$SG_COUNT" ] && [ "$SG_COUNT" != "0" ]; then
+                            for i in $(seq 0 $((SG_COUNT - 1))); do
+                                SG_GID=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" --query "SecurityGroups[$i].GroupId" --output text 2>/dev/null)
+                                SG_GNAME=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" --query "SecurityGroups[$i].GroupName" --output text 2>/dev/null)
+                                echo -e "   $((i + 1))) $SG_GNAME ($SG_GID)"
+                            done
+                            echo ""
+                            read -p "Enter security group number or ID [1]: " SG_INPUT
+                            SG_INPUT=${SG_INPUT:-1}
+                            if [[ "$SG_INPUT" =~ ^sg- ]]; then
+                                SG_ID="$SG_INPUT"
+                            else
+                                IDX=$(($SG_INPUT - 1))
+                                SG_ID=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" --query "SecurityGroups[$IDX].GroupId" --output text 2>/dev/null)
+                            fi
+                        fi
+                        if [ -z "$SG_ID" ] || [ "$SG_ID" == "None" ]; then
                             echo -e "   ${RED}❌ No security group ID provided${NC}"
                             exit 1
                         fi
-                        
                         if ! aws ec2 describe-security-groups --group-ids $SG_ID --filters "Name=vpc-id,Values=$VPC_ID" &>/dev/null; then
                             echo -e "   ${RED}❌ Security group $SG_ID not found in VPC $VPC_ID${NC}"
                             exit 1
                         fi
-                        
                         echo -e "   ${GREEN}✓${NC} Using existing security group: $SG_ID"
                     else
                         echo ""
@@ -468,32 +485,37 @@ setup_security_group() {
     echo -e "   Adding security group rules..."
     add_sg_rule 22 "${MY_IP}/32" "SSH rule"
     add_sg_rule 8080 "0.0.0.0/0" "HTTP rule"
-    add_sg_rule 8443 "0.0.0.0/0" "HTTPS rule"
+    add_sg_rule 443 "0.0.0.0/0" "HTTPS rule"
 }
 
-# Function to generate user data script
+# Function to generate user data script (ADMIN_PASSWORD must be set and escaped for safe use in script)
 generate_user_data_script() {
+    # Escape ADMIN_PASSWORD for safe use inside single-quoted context in generated script
+    ADMIN_PASSWORD_SAFE=$(printf '%s' "$ADMIN_PASSWORD" | sed "s/'/'\\\\''/g")
     cat <<EOF
 #!/bin/bash
-set -e
+# Do not use set -e; user-data often fails on yum update or similar; we exit explicitly where needed
 exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
 
 echo "=== Starting Keycloak installation ==="
 date
 
 echo "Updating system..."
-yum update -y
+yum update -y || true
 
 echo "Installing Docker..."
-yum install docker -y
+yum install docker -y || { echo "yum install docker failed"; exit 1; }
 
 echo "Starting Docker..."
 systemctl start docker
 systemctl enable docker
 
-echo "Waiting for Docker to be ready..."
-sleep 10
-docker info > /dev/null 2>&1 || sleep 10
+echo "Waiting for Docker to be ready (up to 2 min)..."
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40; do
+  docker info > /dev/null 2>&1 && break
+  sleep 3
+done
+docker info > /dev/null 2>&1 || { echo "Docker did not become ready"; exit 1; }
 
 echo "Adding ec2-user to docker group..."
 usermod -a -G docker ec2-user
@@ -517,30 +539,40 @@ docker rm -f keycloak 2>/dev/null || true
 echo "Generating self-signed certificate for HTTPS..."
 mkdir -p /opt/keycloak-certs
 cd /opt/keycloak-certs
+# Instance must fetch its own public IP. Use IMDSv2 (token required) - default for new instances.
+get_meta() { curl -s -H "X-aws-ec2-metadata-token: \${IMDS_TOKEN}" --connect-timeout 2 "http://169.254.169.254/latest/meta-data/\${1}" 2>/dev/null; }
+PUBLIC_IP=""
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  IMDS_TOKEN=\$(curl -s -X PUT --connect-timeout 2 -H "X-aws-ec2-metadata-token-ttl-seconds: 60" "http://169.254.169.254/latest/api/token" 2>/dev/null)
+  [ -n "\${IMDS_TOKEN}" ] && PUBLIC_IP=\$(get_meta public-ipv4) && [ -n "\${PUBLIC_IP}" ] && break
+  sleep 3
+done
+[ -z "\${PUBLIC_IP}" ] && PUBLIC_IP=127.0.0.1
 openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-  -keyout server.key \
-  -out server.crt \
+  -keyout tls.key \
+  -out tls.crt \
   -subj "/CN=keycloak" \
-  -addext "subjectAltName=DNS:keycloak,IP:127.0.0.1"
+  -addext "subjectAltName=DNS:keycloak,DNS:localhost,IP:127.0.0.1,IP:\${PUBLIC_IP}"
 
-chmod 644 server.crt
-chmod 600 server.key
-chown 1000:1000 server.crt server.key
+chmod 644 tls.crt
+chmod 600 tls.key
+chown 1000:1000 tls.crt tls.key
 
 echo "Starting Keycloak container with HTTPS enabled..."
+# Mount certs to /etc/x509/https (Keycloak Quarkus reads KC_* env vars; avoid overwriting /opt/keycloak/conf)
 docker run -d --name keycloak --restart unless-stopped \
   -p 8080:8080 \
-  -p 8443:8443 \
-  -v /opt/keycloak-certs:/opt/keycloak/conf \
+  -p 443:8443 \
+  -v /opt/keycloak-certs:/etc/x509/https:ro \
   -e KEYCLOAK_ADMIN=admin \
-  -e KEYCLOAK_ADMIN_PASSWORD=${ADMIN_PASSWORD} \
+  -e KEYCLOAK_ADMIN_PASSWORD='${ADMIN_PASSWORD_SAFE}' \
+  -e KC_HTTPS_CERTIFICATE_FILE=/etc/x509/https/tls.crt \
+  -e KC_HTTPS_CERTIFICATE_KEY_FILE=/etc/x509/https/tls.key \
   quay.io/keycloak/keycloak:latest \
   start \
     --http-enabled=true \
     --http-port=8080 \
     --https-port=8443 \
-    --https-certificate-file=/opt/keycloak/conf/server.crt \
-    --https-certificate-key-file=/opt/keycloak/conf/server.key \
     --hostname-strict=false || {
     echo "Failed to start container, checking logs..."
     docker logs keycloak 2>&1 || true
@@ -641,7 +673,7 @@ display_success_message() {
     echo -e "   ${YELLOW}⏳ Installing... (wait 2-3 minutes for Keycloak to start)${NC}"
     echo ""
     echo -e "   ${GREEN}┌─────────────────────────────────────────────────────┐${NC}"
-    echo -e "   ${GREEN}│${NC} ${GREEN}🔒 HTTPS:${NC} ${CYAN}https://${PUBLIC_IP}:8443${NC}                    ${GREEN}│${NC}"
+    echo -e "   ${GREEN}│${NC} ${GREEN}🔒 HTTPS:${NC} ${CYAN}https://${PUBLIC_IP}:443${NC}                    ${GREEN}│${NC}"
     echo -e "   ${GREEN}│${NC} ${BLUE}🔓 HTTP:${NC}  ${CYAN}http://${PUBLIC_IP}:8080${NC}                     ${GREEN}│${NC}"
     echo -e "   ${GREEN}└─────────────────────────────────────────────────────┘${NC}"
     echo ""
@@ -683,20 +715,20 @@ display_success_message() {
     echo -e "   ${GREEN}Option 1:${NC} View certificate on the instance"
     echo -e "   ${CYAN}┌─────────────────────────────────────────────────────┐${NC}"
     echo -e "   ${CYAN}│${NC} ssh -i ${KEY_NAME}.pem ec2-user@${PUBLIC_IP}              ${CYAN}│${NC}"
-    echo -e "   ${CYAN}│${NC} sudo openssl x509 -in /opt/keycloak-certs/server.crt \\${NC}"
+    echo -e "   ${CYAN}│${NC} sudo openssl x509 -in /opt/keycloak-certs/tls.crt \\${NC}"
     echo -e "   ${CYAN}│${NC}   -text -noout${NC}                                    ${CYAN}│${NC}"
     echo -e "   ${CYAN}└─────────────────────────────────────────────────────┘${NC}"
     echo ""
     echo -e "   ${GREEN}Option 2:${NC} View certificate from your local machine"
     echo -e "   ${CYAN}┌─────────────────────────────────────────────────────┐${NC}"
-    echo -e "   ${CYAN}│${NC} echo | openssl s_client -connect ${PUBLIC_IP}:8443 \\${NC}"
+    echo -e "   ${CYAN}│${NC} echo | openssl s_client -connect ${PUBLIC_IP}:443 \\${NC}"
     echo -e "   ${CYAN}│${NC}   -servername ${PUBLIC_IP} 2>/dev/null | \\${NC}"
     echo -e "   ${CYAN}│${NC}   openssl x509 -noout -text${NC}                ${CYAN}│${NC}"
     echo -e "   ${CYAN}└─────────────────────────────────────────────────────┘${NC}"
     echo ""
     echo -e "   ${GREEN}Option 3:${NC} Download and view certificate"
     echo -e "   ${CYAN}┌─────────────────────────────────────────────────────┐${NC}"
-    echo -e "   ${CYAN}│${NC} echo | openssl s_client -connect ${PUBLIC_IP}:8443 \\${NC}"
+    echo -e "   ${CYAN}│${NC} echo | openssl s_client -connect ${PUBLIC_IP}:443 \\${NC}"
     echo -e "   ${CYAN}│${NC}   -servername ${PUBLIC_IP} 2>/dev/null | \\${NC}"
     echo -e "   ${CYAN}│${NC}   openssl x509 -out cert.pem${NC}                ${CYAN}│${NC}"
     echo -e "   ${CYAN}│${NC} openssl x509 -in cert.pem -text -noout${NC}       ${CYAN}│${NC}"
@@ -704,7 +736,7 @@ display_success_message() {
     echo ""
     echo -e "   ${GREEN}Quick certificate info:${NC}"
     echo -e "   ${CYAN}┌─────────────────────────────────────────────────────┐${NC}"
-    echo -e "   ${CYAN}│${NC} echo | openssl s_client -connect ${PUBLIC_IP}:8443 \\${NC}"
+    echo -e "   ${CYAN}│${NC} echo | openssl s_client -connect ${PUBLIC_IP}:443 \\${NC}"
     echo -e "   ${CYAN}│${NC}   -servername ${PUBLIC_IP} 2>/dev/null | \\${NC}"
     echo -e "   ${CYAN}│${NC}   openssl x509 -noout -subject -issuer -dates${NC} ${CYAN}│${NC}"
     echo -e "   ${CYAN}└─────────────────────────────────────────────────────┘${NC}"
@@ -714,6 +746,13 @@ display_success_message() {
     echo -e "${YELLOW}└─────────────────────────────────────────────────────────────┘${NC}"
     echo -e "   ${CYAN}Check if container is running:${NC}"
     echo -e "   ${CYAN}ssh -i ${KEY_NAME}.pem ec2-user@${PUBLIC_IP} 'docker ps | grep keycloak'${NC}"
+    echo ""
+    echo -e "   ${YELLOW}If you get \"permission denied\" with docker:${NC} log out and log back in (group"
+    echo -e "   takes effect on new login), or run ${CYAN}newgrp docker${NC}, or use ${CYAN}sudo docker ...${NC}"
+    echo ""
+    echo -e "   ${YELLOW}If no keycloak container exists:${NC} user-data may have failed. On the instance run:"
+    echo -e "   ${CYAN}sudo cat /var/log/cloud-init-output.log${NC}  (look for \"Failed to run module scripts-user\")"
+    echo -e "   ${CYAN}sudo cat /var/log/user-data.log${NC}  (script output; only present if script started)"
     echo ""
     echo -e "   ${CYAN}View recent logs:${NC}"
     echo -e "   ${CYAN}ssh -i ${KEY_NAME}.pem ec2-user@${PUBLIC_IP} 'docker logs keycloak --tail 50'${NC}"
@@ -725,7 +764,7 @@ display_success_message() {
     echo -e "${YELLOW}│${NC}  ${BLUE}🌐 Test Connectivity${NC}                                  ${YELLOW}│${NC}"
     echo -e "${YELLOW}└─────────────────────────────────────────────────────────────┘${NC}"
     echo -e "   ${CYAN}Test HTTPS (with self-signed cert):${NC}"
-    echo -e "   ${CYAN}curl -k -v https://${PUBLIC_IP}:8443${NC}"
+    echo -e "   ${CYAN}curl -k -v https://${PUBLIC_IP}:443${NC}"
     echo ""
     echo -e "   ${CYAN}Test HTTP:${NC}"
     echo -e "   ${CYAN}curl -v http://${PUBLIC_IP}:8080${NC}"
@@ -846,9 +885,9 @@ destroy_instance() {
         VPC_NAME=$(aws ec2 describe-vpcs --vpc-ids $VPC_ID --query 'Vpcs[0].Tags[?Key==`Name`].Value|[0]' --output text 2>/dev/null)
         if [ "$VPC_NAME" == "keycloak-vpc" ]; then
             echo ""
-            read -p "Delete VPC '$VPC_ID' (keycloak-vpc) that was created for Keycloak? (yes/no) [no]: " DELETE_VPC
-            DELETE_VPC=${DELETE_VPC:-no}
-            if [ "$DELETE_VPC" == "yes" ]; then
+            read -p "Delete VPC '$VPC_ID' (keycloak-vpc) that was created for Keycloak? (yes/no) [yes]: " DELETE_VPC
+            DELETE_VPC=${DELETE_VPC:-yes}
+            if [[ "$DELETE_VPC" =~ ^[yY] ]]; then
                 echo -e "${YELLOW}🗑️  Deleting VPC and associated resources...${NC}"
                 
                 # Get Internet Gateway
@@ -969,7 +1008,7 @@ show_status() {
         echo -e "   ${YELLOW}ssh -i ${KEY_NAME}.pem ec2-user@${PUBLIC_IP}${NC}"
         echo ""
         echo -e "${BLUE}🌐 Keycloak Access:${NC}"
-        echo -e "   HTTPS: ${GREEN}https://${PUBLIC_IP}:8443${NC}"
+        echo -e "   HTTPS: ${GREEN}https://${PUBLIC_IP}:443${NC}"
         echo -e "   HTTP:  ${GREEN}http://${PUBLIC_IP}:8080${NC}"
         echo -e "   Admin: ${GREEN}admin${NC}"
         echo ""

@@ -1,0 +1,3 @@
+# Instance-specific and sensitive (do not commit)
+keycloak-instance-info.txt
+*.pem
